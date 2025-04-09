@@ -1,2 +1,1 @@
-web: python flask_api.py
-worker: python app.py
+web: gunicorn -b 0.0.0.0:$PORT flask_api:app
