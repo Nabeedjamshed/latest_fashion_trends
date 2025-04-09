@@ -1,111 +1,89 @@
-import requests
-from bs4 import BeautifulSoup
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 import json
 import time
-import random
+import datetime
+import warnings
+from pathlib import Path
+
+warnings.simplefilter("ignore", category=ResourceWarning)
 
 urls = [
-    "https://www.flipkart.com/search?q=men%27s+trousers",
-    "https://www.flipkart.com/clothing-and-accessories/topwear/tshirt/men-tshirt/pr?sid=clo,ash,ank,edy&otracker=categorytree&otracker=nmenu_sub_Men_0_T-Shirts",
-    "https://www.flipkart.com/clothing-and-accessories/topwear/shirt/men-shirt/formal-shirt/pr?sid=clo,ash,axc,mmk,bk1&otracker=categorytree&otracker=nmenu_sub_Men_0_Formal%20Shirts",
-    "https://www.flipkart.com/clothing-and-accessories/topwear/shirt/men-shirt/casual-shirt/pr?sid=clo,ash,axc,mmk,kp7&otracker=categorytree&otracker=nmenu_sub_Men_0_Casual%20Shirts",
-    "https://www.flipkart.com/clothing-and-accessories/bottomwear/jeans/men-jeans/pr?sid=clo,vua,k58,i51&otracker=categorytree&otracker=nmenu_sub_Men_0_Jeans",
-    "https://www.flipkart.com/mens-clothing/trousers/pr?sid=2oq,s9b,9uj&otracker=nmenu_sub_Men_0_Casual%20Trousers",
-    "https://www.flipkart.com/clothing-and-accessories/bottomwear/trouser/men-trouser/pr?sid=clo%2Cvua%2Cmle%2Clhk&otracker=categorytree&p%5B%5D=facets.occasion%255B%255D%3DFormal&otracker=nmenu_sub_Men_0_Formal%20Trousers"
+    "https://m.flipkart.com/search?q=men%27s+trousers",
+    "https://m.flipkart.com/clothing-and-accessories/topwear/tshirt/men-tshirt/pr?sid=clo,ash,ank,edy",
+    "https://m.flipkart.com/clothing-and-accessories/topwear/shirt/men-shirt/casual-shirt/pr?sid=clo,ash,axc,mmk,kp7",
+    "https://m.flipkart.com/clothing-and-accessories/bottomwear/jeans/men-jeans/pr?sid=clo,vua,k58,i51",
 ]
 
-user_agents = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/109.0"
-]
+def scrape_flipkart_selenium(urls, limit=150):
+    options = uc.ChromeOptions()
+    options.headless = True
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-dev-shm-usage")
 
-session = requests.Session()
+    driver = uc.Chrome(options=options)
 
-products = []
+    products = []
+    seen_ids = set()
 
-for url in urls:
-    headers = {"User-Agent": random.choice(user_agents)}
-    
     try:
-        response = session.get(url, headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            print(f"Failed to fetch {url} (Status: {response.status_code})")
-            continue
+        for url in urls:
+            driver.get(url)
+            time.sleep(5)  
 
-        soup = BeautifulSoup(response.text, "html.parser")
+            cards = driver.find_elements(By.XPATH, "//div[@data-id]")
+            for card in cards:
+                try:
+                    product_id = card.get_attribute("data-id")
+                    if product_id in seen_ids:
+                        continue
 
-        for div in soup.find_all("div", {"data-id": True}):
-            product_id = div["data-id"]
-            img_tag = div.find("img", {"src": True})
-            if img_tag:
-                image_url = img_tag["src"]
-                products.append({"image_url": image_url, "product_id": product_id})
+                    img = card.find_element(By.TAG_NAME, "img")
+                    image_url = img.get_attribute("src") or img.get_attribute("data-src")
+                    if image_url:
+                        products.append({
+                            "product_id": product_id,
+                            "image_url": image_url,
+                            "timestamp": datetime.datetime.now().isoformat()
+                        })
+                        seen_ids.add(product_id)
 
-        time.sleep(random.uniform(2, 5)) 
+                    if len(products) >= limit:
+                        break
+                except Exception:
+                    continue
 
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching {url}: {e}")
-        continue
+            if len(products) >= limit:
+                break
 
-output = {"products": products}
-with open("latest_fashion.json", "w") as file:
-    json.dump(output, file, indent=4)
+            time.sleep(3)
+    finally:
+        try:
+            driver.quit()
+        except Exception as e:
+            print(f"Error during Selenium cleanup: {e}")
+        finally:
+            driver.stop_client() 
 
-print("Latest fashion trends saved!")
+    return products
 
+all_path = Path("all_products.json")
+all_data = []
 
+if all_path.exists():
+    with open(all_path, "r") as f:
+        all_data = json.load(f)["products"]
 
+new_products = scrape_flipkart_selenium(urls, limit=150)
 
+all_data.extend(new_products)
 
-# import requests
-# from bs4 import BeautifulSoup
-# import json
+with open("all_products.json", "w") as f:
+    json.dump({"products": all_data}, f, indent=4)
 
-# # Flipkart URLs
-# urls = [
-#     "https://www.flipkart.com/search?q=men%27s+trousers",
-#     "https://www.flipkart.com/clothing-and-accessories/topwear/tshirt/men-tshirt/pr?sid=clo,ash,ank,edy&otracker=categorytree&otracker=nmenu_sub_Men_0_T-Shirts",
-#     "https://www.flipkart.com/clothing-and-accessories/topwear/shirt/men-shirt/formal-shirt/pr?sid=clo,ash,axc,mmk,bk1&otracker=categorytree&otracker=nmenu_sub_Men_0_Formal%20Shirts",
-#     "https://www.flipkart.com/clothing-and-accessories/topwear/shirt/men-shirt/casual-shirt/pr?sid=clo,ash,axc,mmk,kp7&otracker=categorytree&otracker=nmenu_sub_Men_0_Casual%20Shirts",
-#     "https://www.flipkart.com/clothing-and-accessories/bottomwear/jeans/men-jeans/pr?sid=clo,vua,k58,i51&otracker=categorytree&otracker=nmenu_sub_Men_0_Jeans",
-#     "https://www.flipkart.com/mens-clothing/trousers/pr?sid=2oq,s9b,9uj&otracker=nmenu_sub_Men_0_Casual%20Trousers",
-#     "https://www.flipkart.com/clothing-and-accessories/bottomwear/trouser/men-trouser/pr?sid=clo%2Cvua%2Cmle%2Clhk&otracker=categorytree&p%5B%5D=facets.occasion%255B%255D%3DFormal&otracker=nmenu_sub_Men_0_Formal%20Trousers"
-# ]
+with open("latest_batch.json", "w") as f:
+    json.dump({"products": new_products}, f, indent=4)
 
-# # Headers to mimic a real browser request
-# headers = {
-#     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-# }
-
-# products = []
-
-# # Loop through each URL and scrape images
-# for url in urls:
-#     response = requests.get(url, headers=headers)
-    
-#     # Check if request was successful
-#     if response.status_code != 200:
-#         print(f"Failed to fetch {url}")
-#         continue
-
-#     soup = BeautifulSoup(response.text, "html.parser")
-
-#     # Extract product image URLs and product IDs
-#     for div in soup.find_all("div", {"data-id": True}):
-#         product_id = div["data-id"]
-#         img_tag = div.find("img", {"src": True})
-#         if img_tag:
-#             image_url = img_tag["src"]
-#             products.append({"image_url": image_url, "product_id": product_id})
-
-# # Convert to JSON format
-# output = {"products": products}
-
-# # Print JSON output
-# print(json.dumps(output, indent=4))
-
-
-
+print(f"Scraped and saved {len(new_products)} new products!")
